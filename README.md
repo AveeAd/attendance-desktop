@@ -6,7 +6,9 @@ A local-first desktop app for employee attendance tracking. Built with Tauri v2,
 
 ## Downloads
 
-Every push builds installers for macOS (Apple Silicon and Intel), Windows and Linux. Build outputs are attached to the GitHub Actions run; version tags (`v*`, for example `v0.1.0`) additionally create a draft GitHub Release with all platform installers. The macOS builds are unsigned until code signing and notarization are configured.
+Download the latest installers from **[GitHub Releases](https://github.com/AveeAd/attendance-desktop/releases/latest)**. Released builds include macOS (Apple Silicon and Intel), Windows, and Linux installers, and can be downloaded on any device without signing in.
+
+Every push also builds the same installers as workflow artifacts in the Actions run, but those require GitHub sign-in and are not public downloads. Pushing a version tag (`v*`, for example `v0.1.0`) publishes a new release with all platform installers. The macOS builds are unsigned until code signing and notarization are configured; if macOS blocks them, right-click the app and choose **Open**.
 
 ## Features
 

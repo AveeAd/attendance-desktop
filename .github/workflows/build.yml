@@ -90,8 +90,10 @@ jobs:
           workflowArtifactNamePattern: "[platform]-[arch]-[bundle]"
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
           releaseName: ${{ startsWith(github.ref, 'refs/tags/v') && format('Attendance {0}', github.ref_name) || '' }}
-          releaseBody: Installer builds for macOS (Apple Silicon and Intel), Windows, and Linux.
-          releaseDraft: true
+          releaseBody: |
+            Installers for macOS (Apple Silicon and Intel), Windows, and Linux.
+            macOS builds are unsigned until code signing is configured; if macOS blocks them, right-click the app and choose Open.
+          releaseDraft: false
           prerelease: false
 
       - name: Show artifact paths
