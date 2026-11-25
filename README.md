@@ -2,7 +2,7 @@
 
 [![Build desktop apps](https://github.com/AveeAd/attendance-desktop/actions/workflows/build.yml/badge.svg)](https://github.com/AveeAd/attendance-desktop/actions/workflows/build.yml)
 
-A local-first desktop app for employee attendance tracking. Built with Tauri v2, React, TypeScript and SQLite. All data stays on the computer running the app.
+A local-first desktop app for employee attendance tracking. Built with Tauri v2, React, TypeScript and SQLite. It works entirely offline, and can optionally sync several desktops through a shared, server-authoritative API.
 
 ## Downloads
 
@@ -14,6 +14,7 @@ Builds run only when a version tag (`v*`, for example `v0.1.0`) is pushed from a
 
 - **Clock station** — scan a badge/QR code or type an employee ID to clock in, clock out, start a break or end a break
 - **Phone clock-in** — one shared QR code opens a LAN page where employees clock in/out from their phone
+- **Cloud sync** — optional shared Postgres server with offline write queue, conflict notices and automatic background sync
 - **Employee profiles** — codes, departments, roles, printable QR badges, optional per-employee PIN, activate/deactivate
 - **Break tracking** — break time is subtracted from worked hours automatically
 - **Timesheet reports** — daily records, worked hours, overtime, filters, CSV and Excel export
@@ -49,6 +50,23 @@ Run the API server locally with:
 DATABASE_URL=postgres://... API_KEY=your-secret npm run server:dev
 ```
 
+## Cloud sync (optional)
+
+The desktop app stays fully usable without a server. When connected, the API is the source of truth and desktops keep a local SQLite cache plus an outbox for offline writes.
+
+1. Deploy the API with `apps/server/render.yaml` (manual deploy; the blueprint does not auto-deploy) or run it locally as above. Set `DATABASE_URL` and a strong `API_KEY`; the server stores only a scrypt hash of the key.
+2. In the desktop app, open **Settings → Cloud sync**, enter the server URL and the shared API key, then click **Connect and sync**. The same key can be used on several desktops; each app generates and sends its own device ID.
+3. Leave **Import this computer's existing data** checked to upload current employees, shifts, assignments, duty roster, events and the synced settings allowlist before pulling server data. Uncheck it to discard the local cache and use only server data.
+
+Sync behavior:
+
+- Runs automatically 15 seconds after launch and every 60 seconds afterwards; **Sync now** is available in Settings.
+- Local writes are durable in the outbox. Network failures are retried on the next sync with the same idempotency key, so phone scans and manual events are not duplicated.
+- If the server rejects a stale write with `409`, the change is recorded as a conflict, surfaced in Settings, and server data wins on the next pull. Rejected clock events are removed locally.
+- Only `company_name`, `overtime_daily_hours`, `overtime_weekly_hours` and `idle_lock_minutes` sync. Admin PINs, employee PINs and cloud credentials stay local.
+- The API key is stored in the app's SQLite database and never returned to the UI; only a masked hint and the device ID are shown.
+- **Disconnect** clears the credentials but keeps the local cache. Reconnecting with **Import** unchecked forces a fresh bootstrap pull.
+
 ## Checks
 
 ```bash
@@ -75,7 +93,7 @@ Events created from phones are saved with the source `mobile` and use the deskto
 
 ### Network & security notes
 
-- Phones must be on the **same Wi-Fi / LAN** as the computer. No internet connection or cloud service is involved.
+- Phones must be on the **same Wi-Fi / LAN** as the computer. The phone page itself needs no internet or cloud service; if cloud sync is configured, the desktop queues those events locally and uploads them when the server is reachable.
 - The QR contains only the LAN URL — there are no secrets encoded in it.
 - Access is protected by the **employee code**, plus an optional **per-employee PIN** set on the Employees page (4+ digits, stored as an Argon2 hash).
 - The server listens on all interfaces on the local network only. It is **not** a public/internet-facing service; do not port-forward it or put it behind a reverse proxy.
@@ -105,7 +123,7 @@ Tauri resolves the platform app data directory and stores a single SQLite file t
 
 Use **Settings → Back up database** to save a snapshot anywhere you like.
 
-The mobile feature adds a `pin_hash` column to the `employees` table. Existing databases are upgraded automatically on launch.
+The mobile feature adds a `pin_hash` column to the `employees` table. Cloud sync adds `cloud_ids`, `outbox` and `cloud_conflicts` tables plus cloud metadata in `settings`. Existing databases are upgraded automatically on launch.
 
 ## Project layout
 
@@ -119,6 +137,7 @@ apps/
       store/          zustand stores (auth, toasts)
     src-tauri/        Rust backend
       src/commands.rs all Tauri commands exposed to the frontend
+      src/cloud/      API client, ID mapping, outbox, import and sync engine
       src/db/         SQLite connection, migrations, repositories
       src/mobile.rs   LAN HTTP server and mobile clock-in API
       src/mobile.html standalone phone clock-in page served by the LAN server
@@ -137,3 +156,6 @@ apps/
 - Admin PINs and optional employee PINs are hashed with Argon2 and never stored in plain text.
 - The phone page is plain HTML/CSS/JS embedded in the Rust binary — no extra frontend build or hosted assets are needed for mobile access.
 - The SQLite connection is wrapped in `Arc<Mutex<Connection>>` so the Tauri commands and LAN server thread share one local database safely.
+- Local integer IDs are mapped to stable server UUIDs so imports, offline writes and later pulls refer to the same records.
+- Server wins conflicts: queued writes are never silently dropped, but rejected changes are recorded and shown to the user instead of overwriting authoritative data.
+- Reports and exports are generated in the desktop from the local API cache, so they keep working while offline.

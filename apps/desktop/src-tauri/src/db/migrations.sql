@@ -65,9 +65,49 @@ CREATE TABLE IF NOT EXISTS settings (
     value  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS cloud_ids (
+    kind       TEXT    NOT NULL,
+    local_id   INTEGER NOT NULL,
+    remote_id  TEXT    NOT NULL,
+    version    TEXT    NOT NULL DEFAULT '',
+    PRIMARY KEY (kind, local_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cloud_ids_remote ON cloud_ids(kind, remote_id);
+
+CREATE TABLE IF NOT EXISTS outbox (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    idempotency_key TEXT    NOT NULL UNIQUE,
+    kind            TEXT    NOT NULL,
+    operation       TEXT    NOT NULL,
+    local_id        INTEGER NOT NULL,
+    payload         TEXT    NOT NULL,
+    status          TEXT    NOT NULL DEFAULT 'pending',
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    last_error      TEXT,
+    created_at      TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_outbox_status ON outbox(status, id);
+
+CREATE TABLE IF NOT EXISTS cloud_conflicts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT    NOT NULL,
+    local_id    INTEGER NOT NULL,
+    message     TEXT    NOT NULL,
+    occurred_at TEXT    NOT NULL
+);
+
 INSERT OR IGNORE INTO settings(key, value) VALUES
     ('company_name', 'My Organization'),
     ('overtime_daily_hours', '8'),
     ('overtime_weekly_hours', '40'),
     ('idle_lock_minutes', '15'),
-    ('admin_pin_hash', '');
+    ('admin_pin_hash', ''),
+    ('cloud_api_url', ''),
+    ('cloud_api_key', ''),
+    ('cloud_device_id', ''),
+    ('cloud_cursor', '0'),
+    ('cloud_imported', ''),
+    ('cloud_last_sync', ''),
+    ('cloud_last_error', '');

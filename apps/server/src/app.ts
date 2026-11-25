@@ -562,6 +562,18 @@ export async function buildServer({ pool, logger = false }: AppOptions): Promise
     return reply.code(201).send({ event, duplicate: false });
   });
 
+  app.delete("/api/v1/events/:id", async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const organizationId = orgId(request);
+    const result = await pool.query(
+      "DELETE FROM time_events WHERE organization_id = $1 AND id = $2",
+      [organizationId, params.id],
+    );
+    if (!result.rowCount) return reply.code(404).send({ error: "not_found" });
+    await logChange(organizationId, "event", params.id, "delete", { id: params.id });
+    return reply.code(204).send();
+  });
+
   app.post("/api/v1/import", async (request, reply) => {
     const input = ImportBody.parse(request.body);
     const organizationId = orgId(request);

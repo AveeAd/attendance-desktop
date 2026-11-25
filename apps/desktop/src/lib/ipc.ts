@@ -4,6 +4,8 @@ import type {
   AssignmentInput,
   ClockInput,
   ClockResult,
+  CloudConfigView,
+  CloudConflict,
   CreateEmployeeInput,
   DutyRosterEntry,
   DutyRosterGenerateResult,
@@ -11,11 +13,13 @@ import type {
   Employee,
   EmployeeStatus,
   MobileServerState,
+  OutboxItemView,
   ScheduleEntry,
   SettingsInput,
   Shift,
   ShiftAssignment,
   ShiftInput,
+  SyncResult,
   TimeEvent,
   TimesheetReport,
   UpdateEmployeeInput,
@@ -140,6 +144,21 @@ export const api = {
     invoke<MobileServerState>("start_mobile_server"),
   stopMobileServer: () => invoke<MobileServerState>("stop_mobile_server"),
   mobileServerStatus: () => invoke<MobileServerState>("mobile_server_status"),
+
+  getCloudConfig: () => invoke<CloudConfigView>("get_cloud_config"),
+  configureCloud: (apiUrl: string, apiKey: string, importExisting: boolean) =>
+    invoke<SyncResult>("configure_cloud", {
+      apiUrl,
+      apiKey,
+      importExisting,
+    }),
+  disconnectCloud: () => invoke<CloudConfigView>("disconnect_cloud"),
+  syncCloud: () => invoke<SyncResult>("sync_cloud"),
+  cloudConflicts: () => invoke<CloudConflict[]>("cloud_conflicts"),
+  acknowledgeCloudConflicts: (ids: number[]) =>
+    invoke<void>("acknowledge_cloud_conflicts", { ids }),
+  cloudOutbox: () => invoke<OutboxItemView[]>("cloud_outbox"),
+  retryCloudWrites: () => invoke<number>("retry_cloud_writes"),
 };
 
 export function errorMessage(error: unknown): string {

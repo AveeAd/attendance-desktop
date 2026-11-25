@@ -27,6 +27,11 @@ const navigation = [
 export function AppShell() {
   const [now, setNow] = useState(new Date());
   const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: api.getSettings });
+  const cloudQuery = useQuery({
+    queryKey: ["cloud"],
+    queryFn: api.getCloudConfig,
+    refetchInterval: 60_000,
+  });
   const lock = useAuthStore((state) => state.lock);
   const unlocked = useAuthStore((state) => state.unlocked);
   const idleTimer = useRef<number | null>(null);
@@ -92,7 +97,9 @@ export function AppShell() {
             <LockKeyhole className="size-3.5" />
             {settingsQuery.data?.pin_enabled ? "Admin PIN enabled" : "No admin PIN set"}
           </div>
-          <p className="mt-1 text-[11px] text-slate-400">Local data · v0.1.0</p>
+          <p className="mt-1 text-[11px] text-slate-400">
+            {cloudQuery.data?.configured ? "Synced with server" : "Local data"} · v0.1.0
+          </p>
         </div>
       </aside>
 

@@ -191,3 +191,41 @@ export interface SettingsInput {
   overtime_weekly_hours: number;
   idle_lock_minutes: number;
 }
+
+export interface CloudConfigView {
+  configured: boolean;
+  apiUrl: string;
+  deviceId: string;
+  keyHint: string;
+  imported: boolean;
+  lastSync: string | null;
+  lastError: string | null;
+  pending: number;
+  conflicts: number;
+}
+
+export interface SyncResult {
+  pushed: number;
+  pulled: number;
+  conflicts: number;
+  cursor: string;
+  syncedAt: string;
+}
+
+export interface CloudConflict {
+  id: number;
+  kind: string;
+  localId: number;
+  message: string;
+  occurredAt: string;
+}
+
+export interface OutboxItemView {
+  id: number;
+  kind: string;
+  operation: string;
+  localId: number;
+  status: string;
+  lastError: string | null;
+  createdAt: string;
+}

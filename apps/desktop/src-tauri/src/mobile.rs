@@ -292,7 +292,7 @@ fn clock_in_out(db: &Db, input: &ClockRequest) -> AppResult<serde_json::Value> {
     }
 
     let (occurred_at, epoch) = timestamp_or_now(None)?;
-    events::insert(
+    let event = events::insert(
         &conn,
         employee.id,
         event_type,
@@ -301,6 +301,9 @@ fn clock_in_out(db: &Db, input: &ClockRequest) -> AppResult<serde_json::Value> {
         "mobile",
         None,
     )?;
+    // Phone scans are validated against the local cache but queued for the
+    // authoritative server so an offline phone still records the clock-in.
+    crate::cloud::queue::event(&conn, event.id)?;
 
     Ok(serde_json::json!({
         "message": if event_type == EventType::ClockIn { "Clocked in" } else { "Clocked out" },

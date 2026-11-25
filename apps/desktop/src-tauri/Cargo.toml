@@ -26,6 +26,8 @@ thiserror = "2"
 csv = "1.3"
 rust_xlsxwriter = "0.85"
 tiny_http = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+uuid = { version = "1", features = ["v4"] }
 
 [profile.release]
 codegen-units = 1

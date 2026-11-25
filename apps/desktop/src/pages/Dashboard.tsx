@@ -5,6 +5,8 @@ import { QRCodeSVG } from "qrcode.react";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  Cloud,
+  CloudOff,
   Coffee,
   Copy,
   Play,
@@ -62,7 +64,13 @@ export function Dashboard() {
     queryFn: api.mobileServerStatus,
     refetchInterval: 10_000,
   });
+  const cloudQuery = useQuery({
+    queryKey: ["cloud"],
+    queryFn: api.getCloudConfig,
+    refetchInterval: 30_000,
+  });
   const mobile = mobileQuery.data;
+  const cloud = cloudQuery.data;
   const mobileUrl = mobile?.url ?? "";
 
   const startMobile = useMutation({
@@ -222,6 +230,47 @@ export function Dashboard() {
       </div>
 
       <div className="space-y-5">
+        <Card
+          title="Cloud sync"
+          description="Read-only status of the shared server connection"
+          actions={
+            <Badge tone={cloud?.configured ? "green" : "slate"}>
+              {cloud?.configured ? <><Cloud className="size-3" /> Connected</> : <><CloudOff className="size-3" /> Local only</>}
+            </Badge>
+          }
+        >
+          <div className="space-y-2 px-5 py-4 text-xs text-slate-600">
+            {cloud?.configured ? (
+              <>
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-400">Last sync</span>
+                  <span className="font-medium tabular-nums">
+                    {cloud.lastSync ? format(new Date(cloud.lastSync), "MMM d, HH:mm") : "Never"}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-400">Pending uploads</span>
+                  <span className="font-medium tabular-nums">{cloud.pending}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-400">Conflicts</span>
+                  <span className={cn("font-medium tabular-nums", cloud.conflicts > 0 && "text-rose-600")}>
+                    {cloud.conflicts}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-slate-400">Device</span>
+                  <span className="truncate font-mono text-[11px]">{cloud.deviceId.slice(0, 8)}…</span>
+                </div>
+              </>
+            ) : (
+              <p className="leading-5 text-slate-500">
+                This computer works offline. Connect a shared server in Settings to sync attendance across desktops.
+              </p>
+            )}
+          </div>
+        </Card>
+
         <Card
           title="Phone clock-in"
           description="One shared QR for the whole team"

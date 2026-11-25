@@ -28,6 +28,12 @@ pub enum AppError {
     Csv(#[from] csv::Error),
     #[error("Excel export error: {0}")]
     Xlsx(#[from] rust_xlsxwriter::XlsxError),
+    #[error("Cloud sync error: {0}")]
+    Cloud(String),
+    #[error("Cloud request failed ({status}): {message}")]
+    CloudHttp { status: u16, message: String },
+    #[error("Cloud rejected this change: {message}")]
+    CloudConflict { message: String },
 }
 
 impl serde::Serialize for AppError {

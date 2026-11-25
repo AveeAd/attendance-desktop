@@ -6,6 +6,7 @@ use chrono::{Duration, Local, NaiveDate};
 use rand_core::OsRng;
 use tauri::command;
 
+use crate::cloud::{self, CloudConfigView, CloudConflict, OutboxItemView, SyncResult};
 use crate::db::{lock_conn, parse_timestamp, timestamp_or_now, Db};
 use crate::error::{AppError, AppResult};
 use crate::models::{
@@ -32,7 +33,9 @@ pub fn get_employee(db: tauri::State<'_, Db>, id: i64) -> AppResult<Employee> {
 #[command]
 pub fn create_employee(db: tauri::State<'_, Db>, input: CreateEmployee) -> AppResult<Employee> {
     let conn = lock_conn(&db)?;
-    crate::db::employees::create(&conn, &input)
+    let employee = crate::db::employees::create(&conn, &input)?;
+    cloud::queue::employee_upsert(&conn, employee.id)?;
+    Ok(employee)
 }
 
 #[command]
@@ -42,13 +45,16 @@ pub fn update_employee(
     input: UpdateEmployee,
 ) -> AppResult<Employee> {
     let conn = lock_conn(&db)?;
-    crate::db::employees::update(&conn, id, &input)
+    let employee = crate::db::employees::update(&conn, id, &input)?;
+    cloud::queue::employee_upsert(&conn, employee.id)?;
+    Ok(employee)
 }
 
 #[command]
 pub fn set_employee_active(db: tauri::State<'_, Db>, id: i64, active: bool) -> AppResult<()> {
     let conn = lock_conn(&db)?;
-    crate::db::employees::set_active(&conn, id, active)
+    crate::db::employees::set_active(&conn, id, active)?;
+    cloud::queue::employee_upsert(&conn, id)
 }
 
 #[command]
@@ -70,6 +76,7 @@ pub fn clock_event(db: tauri::State<'_, Db>, input: ClockInput) -> AppResult<Clo
         &source,
         input.note.as_deref(),
     )?;
+    cloud::queue::event(&conn, event.id)?;
 
     let events = crate::db::events::list(&conn, Some(employee.id), None, None, 500)?;
     let status = build_statuses(&[employee.clone()], &events)
@@ -116,7 +123,7 @@ pub fn create_manual_event(
     let conn = lock_conn(&db)?;
     let _employee = crate::db::employees::get(&conn, employee_id)?;
     let (occurred_at, epoch) = timestamp_or_now(Some(&occurred_at))?;
-    crate::db::events::insert(
+    let event = crate::db::events::insert(
         &conn,
         employee_id,
         event_type,
@@ -124,12 +131,15 @@ pub fn create_manual_event(
         epoch,
         "manual",
         note.as_deref(),
-    )
+    )?;
+    cloud::queue::event(&conn, event.id)?;
+    Ok(event)
 }
 
 #[command]
 pub fn delete_event(db: tauri::State<'_, Db>, id: i64) -> AppResult<()> {
     let conn = lock_conn(&db)?;
+    cloud::queue::event_delete(&conn, id)?;
     crate::db::events::delete(&conn, id)
 }
 
@@ -158,18 +168,23 @@ pub fn list_shifts(db: tauri::State<'_, Db>, active_only: Option<bool>) -> AppRe
 #[command]
 pub fn create_shift(db: tauri::State<'_, Db>, input: ShiftInput) -> AppResult<Shift> {
     let conn = lock_conn(&db)?;
-    crate::db::shifts::create_shift(&conn, &input)
+    let shift = crate::db::shifts::create_shift(&conn, &input)?;
+    cloud::queue::shift_upsert(&conn, shift.id)?;
+    Ok(shift)
 }
 
 #[command]
 pub fn update_shift(db: tauri::State<'_, Db>, id: i64, input: ShiftInput) -> AppResult<Shift> {
     let conn = lock_conn(&db)?;
-    crate::db::shifts::update_shift(&conn, id, &input)
+    let shift = crate::db::shifts::update_shift(&conn, id, &input)?;
+    cloud::queue::shift_upsert(&conn, shift.id)?;
+    Ok(shift)
 }
 
 #[command]
 pub fn delete_shift(db: tauri::State<'_, Db>, id: i64) -> AppResult<()> {
     let conn = lock_conn(&db)?;
+    cloud::queue::shift_delete(&conn, id)?;
     crate::db::shifts::delete_shift(&conn, id)
 }
 
@@ -188,12 +203,15 @@ pub fn create_assignment(
     input: AssignmentInput,
 ) -> AppResult<ShiftAssignment> {
     let conn = lock_conn(&db)?;
-    crate::db::shifts::create_assignment(&conn, &input)
+    let assignment = crate::db::shifts::create_assignment(&conn, &input)?;
+    cloud::queue::assignment_upsert(&conn, assignment.id)?;
+    Ok(assignment)
 }
 
 #[command]
 pub fn delete_assignment(db: tauri::State<'_, Db>, id: i64) -> AppResult<()> {
     let conn = lock_conn(&db)?;
+    cloud::queue::assignment_delete(&conn, id)?;
     crate::db::shifts::delete_assignment(&conn, id)
 }
 
@@ -236,6 +254,7 @@ pub fn list_duty_roster(db: tauri::State<'_, Db>, week_start: String) -> AppResu
 pub fn create_duty_roster(db: tauri::State<'_, Db>, input: DutyRosterInput) -> AppResult<DutyRosterEntry> {
     let conn = lock_conn(&db)?;
     let record = crate::db::duty_roster::create(&conn, &input)?;
+    cloud::queue::duty_roster_upsert(&conn, record.id)?;
     Ok(build_duty_roster(&[record], &shifts_for_roster(&conn)?, &[], &today_statuses(&conn)?)
         .into_iter()
         .next()
@@ -250,6 +269,7 @@ pub fn update_duty_roster(
 ) -> AppResult<DutyRosterEntry> {
     let conn = lock_conn(&db)?;
     let record = crate::db::duty_roster::update(&conn, id, &input)?;
+    cloud::queue::duty_roster_upsert(&conn, record.id)?;
     Ok(build_duty_roster(&[record], &shifts_for_roster(&conn)?, &[], &today_statuses(&conn)?)
         .into_iter()
         .next()
@@ -259,6 +279,7 @@ pub fn update_duty_roster(
 #[command]
 pub fn delete_duty_roster(db: tauri::State<'_, Db>, id: i64) -> AppResult<()> {
     let conn = lock_conn(&db)?;
+    cloud::queue::duty_roster_delete(&conn, id)?;
     crate::db::duty_roster::delete(&conn, id)
 }
 
@@ -268,7 +289,23 @@ pub fn generate_duty_roster(
     week_start: String,
 ) -> AppResult<crate::models::DutyRosterGenerateResult> {
     let mut conn = lock_conn(&db)?;
-    crate::db::duty_roster::generate_from_schedule(&mut conn, &week_start)
+    let end = (NaiveDate::parse_from_str(&week_start, "%Y-%m-%d")
+        .map_err(|_| AppError::InvalidInput("Invalid week start date".to_string()))?
+        + Duration::days(6))
+    .format("%Y-%m-%d")
+    .to_string();
+    let before: std::collections::HashSet<i64> = crate::db::duty_roster::list_for_range(&conn, &week_start, &end)?
+        .into_iter()
+        .map(|record| record.id)
+        .collect();
+    let result = crate::db::duty_roster::generate_from_schedule(&mut conn, &week_start)?;
+    let after = crate::db::duty_roster::list_for_range(&conn, &week_start, &end)?;
+    for record in after {
+        if !before.contains(&record.id) {
+            cloud::queue::duty_roster_upsert(&conn, record.id)?;
+        }
+    }
+    Ok(result)
 }
 
 fn shifts_for_roster(conn: &rusqlite::Connection) -> AppResult<Vec<Shift>> {
@@ -489,6 +526,9 @@ pub fn update_settings(db: tauri::State<'_, Db>, input: SettingsInput) -> AppRes
     crate::db::settings::set_value(&conn, "overtime_daily_hours", &input.overtime_daily_hours.to_string())?;
     crate::db::settings::set_value(&conn, "overtime_weekly_hours", &input.overtime_weekly_hours.to_string())?;
     crate::db::settings::set_value(&conn, "idle_lock_minutes", &input.idle_lock_minutes.to_string())?;
+    for key in ["company_name", "overtime_daily_hours", "overtime_weekly_hours", "idle_lock_minutes"] {
+        cloud::queue::setting(&conn, key)?;
+    }
     crate::db::settings::get_all(&conn)
 }
 
@@ -580,6 +620,69 @@ pub fn mobile_server_status(
     server: tauri::State<'_, crate::mobile::MobileServer>,
 ) -> AppResult<crate::mobile::MobileServerState> {
     server.status()
+}
+
+#[command]
+pub fn get_cloud_config(db: tauri::State<'_, Db>) -> AppResult<CloudConfigView> {
+    let conn = lock_conn(&db)?;
+    cloud::config::view(&conn)
+}
+
+#[command]
+pub fn configure_cloud(
+    db: tauri::State<'_, Db>,
+    api_url: String,
+    api_key: String,
+    import_existing: bool,
+) -> AppResult<SyncResult> {
+    match cloud::sync::configure(&db, &api_url, &api_key, import_existing) {
+        Ok(result) => Ok(result),
+        Err(error) => {
+            cloud::sync::fail(&db, &error.to_string());
+            Err(error)
+        }
+    }
+}
+
+#[command]
+pub fn disconnect_cloud(db: tauri::State<'_, Db>) -> AppResult<CloudConfigView> {
+    let conn = lock_conn(&db)?;
+    cloud::config::disconnect(&conn)
+}
+
+#[command]
+pub fn sync_cloud(db: tauri::State<'_, Db>) -> AppResult<SyncResult> {
+    match cloud::sync::sync_now(&db) {
+        Ok(result) => Ok(result),
+        Err(error) => {
+            cloud::sync::fail(&db, &error.to_string());
+            Err(error)
+        }
+    }
+}
+
+#[command]
+pub fn cloud_conflicts(db: tauri::State<'_, Db>) -> AppResult<Vec<CloudConflict>> {
+    let conn = lock_conn(&db)?;
+    cloud::outbox::list_conflicts(&conn)
+}
+
+#[command]
+pub fn acknowledge_cloud_conflicts(db: tauri::State<'_, Db>, ids: Vec<i64>) -> AppResult<()> {
+    let conn = lock_conn(&db)?;
+    cloud::outbox::acknowledge(&conn, &ids)
+}
+
+#[command]
+pub fn cloud_outbox(db: tauri::State<'_, Db>) -> AppResult<Vec<OutboxItemView>> {
+    let conn = lock_conn(&db)?;
+    cloud::outbox::list_all(&conn)
+}
+
+#[command]
+pub fn retry_cloud_writes(db: tauri::State<'_, Db>) -> AppResult<i64> {
+    let conn = lock_conn(&db)?;
+    cloud::outbox::retry_failed(&conn)
 }
 
 #[cfg(test)]
