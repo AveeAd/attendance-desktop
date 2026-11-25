@@ -63,7 +63,7 @@ jobs:
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: ./src-tauri -> target
+          workspaces: ./apps/desktop/src-tauri -> target
           key: ${{ matrix.platform }}-${{ matrix.target }}
 
       - name: Install Linux dependencies
@@ -77,14 +77,19 @@ jobs:
             patchelf \
             xdg-utils
 
-      - name: Install frontend dependencies
+      - name: Install dependencies
         run: npm ci
 
-      - name: Verify frontend
-        run: npm run build
+      - name: Verify desktop frontend
+        run: npm run desktop:build
+
+      - name: Verify API server
+        run: |
+          npm run server:build
+          npm run server:test
 
       - name: Verify backend
-        run: cargo test --lib --manifest-path src-tauri/Cargo.toml
+        run: cargo test --lib --manifest-path apps/desktop/src-tauri/Cargo.toml
 
       - name: Build app bundles
         uses: tauri-apps/tauri-action@v1
@@ -92,7 +97,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          projectPath: ./
+          projectPath: apps/desktop
           tauriScript: npm run tauri
           args: ${{ matrix.args }}
           uploadWorkflowArtifacts: true

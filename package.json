@@ -1,39 +1,17 @@
 {
-  "name": "attendance-desktop",
+  "name": "attendance-workspace",
   "private": true,
   "version": "0.1.0",
-  "type": "module",
+  "workspaces": ["apps/desktop", "apps/server"],
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview",
-    "tauri": "tauri",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
-  "dependencies": {
-    "@tanstack/react-query": "^5.90.2",
-    "@tauri-apps/api": "^2.9.0",
-    "@tauri-apps/plugin-dialog": "^2.4.2",
-    "date-fns": "^4.1.0",
-    "lucide-react": "^0.544.0",
-    "qrcode.react": "^4.2.0",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1",
-    "react-router-dom": "^7.18.7",
-    "recharts": "^2.15.4",
-    "zustand": "^5.0.8"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2.9.2",
-    "@types/node": "^24.10.1",
-    "@types/react": "^19.1.13",
-    "@types/react-dom": "^19.1.9",
-    "@vitejs/plugin-react": "^5.0.3",
-    "@tailwindcss/vite": "^4.1.13",
-    "tailwindcss": "^4.1.13",
-    "typescript": "~5.9.2",
-    "vite": "^7.1.7",
-    "vitest": "^5.1.2"
+    "desktop:dev": "npm run dev -w @attendance/desktop",
+    "desktop:build": "npm run build -w @attendance/desktop",
+    "desktop:test": "npm test -w @attendance/desktop",
+    "desktop:tauri": "npm run tauri -w @attendance/desktop",
+    "server:dev": "npm run dev -w @attendance/server",
+    "server:build": "npm run build -w @attendance/server",
+    "server:start": "npm run start -w @attendance/server",
+    "server:test": "npm test -w @attendance/server",
+    "check": "npm run desktop:build && npm run desktop:test && npm run server:build && npm run server:test"
   }
 }

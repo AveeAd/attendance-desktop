@@ -8,7 +8,7 @@ A local-first desktop app for employee attendance tracking. Built with Tauri v2,
 
 Download the latest installers from **[GitHub Releases](https://github.com/AveeAd/attendance-desktop/releases/latest)**. Released builds include macOS (Apple Silicon and Intel), Windows, and Linux installers, and can be downloaded on any device without signing in.
 
-Every push also builds the same installers as workflow artifacts in the Actions run, but those require GitHub sign-in and are not public downloads. Pushing a version tag (`v*`, for example `v0.1.0`) publishes a new release with all platform installers. The macOS builds are unsigned until code signing and notarization are configured; if macOS blocks them, right-click the app and choose **Open**.
+Builds run only when a version tag (`v*`, for example `v0.1.0`) is pushed from a commit on `main`; the tag publishes a public release with all platform installers. The macOS builds are unsigned until code signing and notarization are configured; if macOS blocks them, right-click the app and choose **Open**.
 
 ## Features
 
@@ -32,23 +32,32 @@ Every push also builds the same installers as workflow artifacts in the Actions 
 
 ```bash
 npm install
-npm run tauri dev
+npm run desktop:tauri dev
 ```
 
 To work on the React UI without the Rust shell:
 
 ```bash
-npm run dev
+npm run desktop:dev
 ```
 
-The UI alone cannot call the database commands outside the Tauri shell, so use `npm run tauri dev` for a working app.
+The UI alone cannot call the database commands outside the Tauri shell, so use `npm run desktop:tauri dev` for a working app.
+
+Run the API server locally with:
+
+```bash
+DATABASE_URL=postgres://... API_KEY=your-secret npm run server:dev
+```
 
 ## Checks
 
 ```bash
-npm run build                       # TypeScript + Vite production build
-cd src-tauri && cargo test --lib    # Rust database and reporting tests
-npm run tauri build                 # create platform installers in src-tauri/target/release/bundle
+npm run desktop:build                                             # TypeScript + Vite build
+npm run desktop:test                                              # frontend tests
+npm run server:build                                              # API server build
+npm run server:test                                               # API server tests
+cargo test --lib --manifest-path apps/desktop/src-tauri/Cargo.toml # Rust tests
+npm run desktop:tauri build                                        # platform installers in apps/desktop/src-tauri/target/release/bundle
 ```
 
 ## Phone clock-in (shared QR)
@@ -101,18 +110,23 @@ The mobile feature adds a `pin_hash` column to the `employees` table. Existing d
 ## Project layout
 
 ```
-src/                 React frontend
-  components/        shared UI, app shell, PIN gate
-  lib/               typed Tauri command wrappers and formatting helpers
-  pages/             dashboard, employees, schedule, reports, settings
-  store/             zustand stores (auth, toasts)
-src-tauri/           Rust backend
-  src/commands.rs    all Tauri commands exposed to the frontend
-  src/db/            SQLite connection, migrations, repositories
-  src/mobile.rs      LAN HTTP server and mobile clock-in API
-  src/mobile.html    standalone phone clock-in page served by the LAN server
-  src/reporting.rs   event-to-period logic, timesheet and schedule calculations
-  icons/             generated app icons (source: assets/app-icon.png)
+apps/
+  desktop/
+    src/              React frontend
+      components/     shared UI, app shell, PIN gate
+      lib/            typed Tauri command wrappers and formatting helpers
+      pages/          dashboard, employees, schedule, reports, settings
+      store/          zustand stores (auth, toasts)
+    src-tauri/        Rust backend
+      src/commands.rs all Tauri commands exposed to the frontend
+      src/db/         SQLite connection, migrations, repositories
+      src/mobile.rs   LAN HTTP server and mobile clock-in API
+      src/mobile.html standalone phone clock-in page served by the LAN server
+      src/reporting.rs event-to-period logic, timesheet and schedule calculations
+      icons/          generated app icons (source: assets/app-icon.png)
+  server/
+    src/              Fastify API, Postgres schema, auth and sync routes
+    render.yaml       Render Web Service + Postgres blueprint
 ```
 
 ## Design decisions
