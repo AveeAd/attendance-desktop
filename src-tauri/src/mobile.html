@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Attendance · Mobile clock</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #f7f8fb;
+        color: #0f172a;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      header {
+        background: #4f46e5;
+        color: white;
+        padding: 26px 20px 34px;
+        border-radius: 0 0 24px 24px;
+        box-shadow: 0 10px 30px -18px rgba(79, 70, 229, 0.9);
+      }
+      header .brand { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.8; }
+      header h1 { margin: 6px 0 0; font-size: 22px; font-weight: 650; }
+      header p { margin: 6px 0 0; font-size: 13px; opacity: 0.85; }
+      main { max-width: 480px; margin: -18px auto 0; padding: 0 16px 40px; }
+      .card {
+        background: white;
+        border: 1px solid #e8ebf1;
+        border-radius: 18px;
+        padding: 20px;
+        box-shadow: 0 12px 30px -22px rgba(15, 23, 42, 0.5);
+        margin-bottom: 14px;
+      }
+      label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin: 0 0 6px; }
+      select, input {
+        width: 100%;
+        border: 1px solid #dbe0e9;
+        border-radius: 10px;
+        padding: 12px;
+        font-size: 15px;
+        background: white;
+        outline: none;
+        margin-bottom: 14px;
+      }
+      select:focus, input:focus { border-color: #818cf8; box-shadow: 0 0 0 3px #e0e7ff; }
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border-radius: 12px;
+        background: #f8fafc;
+        padding: 14px;
+        margin-bottom: 16px;
+      }
+      .dot { width: 10px; height: 10px; border-radius: 999px; background: #94a3b8; flex: none; }
+      .dot.in { background: #10b981; }
+      .dot.break { background: #f59e0b; }
+      .status strong { display: block; font-size: 14px; }
+      .status span { font-size: 12px; color: #64748b; }
+      .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      button {
+        border: none;
+        border-radius: 12px;
+        padding: 15px 10px;
+        font-size: 15px;
+        font-weight: 650;
+        cursor: pointer;
+        color: white;
+      }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      #clockIn { background: #059669; }
+      #clockOut { background: #e11d48; }
+      .message { margin-top: 14px; font-size: 13px; min-height: 18px; }
+      .message.ok { color: #047857; }
+      .message.err { color: #be123c; }
+      .hint { font-size: 12px; color: #94a3b8; text-align: center; margin-top: 18px; line-height: 1.5; }
+      .pill { display: inline-block; background: #eef2ff; color: #4338ca; font-size: 11px; padding: 3px 8px; border-radius: 999px; margin-left: 6px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">Attendance</div>
+      <h1>Mobile clock station</h1>
+      <p id="now"></p>
+    </header>
+
+    <main>
+      <div class="card">
+        <label for="employee">Who are you?</label>
+        <select id="employee"><option value="">Loading employees…</option></select>
+
+        <label for="code">Employee code</label>
+        <input id="code" autocomplete="off" autocapitalize="none" placeholder="e.g. EMP-001" />
+
+        <div id="pinGroup" hidden>
+          <label for="pin">Your PIN</label>
+          <input id="pin" type="password" inputmode="numeric" autocomplete="off" placeholder="4+ digits" />
+        </div>
+
+        <div class="status">
+          <div id="dot" class="dot"></div>
+          <div>
+            <strong id="state">Select an employee</strong>
+            <span id="detail">Status updates automatically</span>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="clockIn">Clock in</button>
+          <button id="clockOut">Clock out</button>
+        </div>
+        <div id="message" class="message"></div>
+      </div>
+
+      <p class="hint">Works on the same Wi-Fi as the attendance computer.<br />Keep this page open to see your live status.</p>
+    </main>
+
+    <script>
+      const employeeSelect = document.getElementById("employee");
+      const codeInput = document.getElementById("code");
+      const pinInput = document.getElementById("pin");
+      const pinGroup = document.getElementById("pinGroup");
+      const message = document.getElementById("message");
+      const dot = document.getElementById("dot");
+      const stateText = document.getElementById("state");
+      const detail = document.getElementById("detail");
+      let employees = [];
+
+      function tick() {
+        document.getElementById("now").textContent = new Date().toLocaleString();
+      }
+      tick();
+      setInterval(tick, 1000);
+
+      function selectedEmployee() {
+        return employees.find((employee) => employee.id === Number(employeeSelect.value));
+      }
+
+      function renderStatus() {
+        const employee = selectedEmployee();
+        if (!employee) {
+          dot.className = "dot";
+          stateText.textContent = "Select an employee";
+          detail.textContent = "Status updates automatically";
+          pinGroup.hidden = true;
+          return;
+        }
+        pinGroup.hidden = !employee.hasPin;
+        dot.className = "dot " + (employee.state === "in" ? "in" : employee.state === "on_break" ? "break" : "");
+        const label = employee.state === "in" ? "Clocked in" : employee.state === "on_break" ? "On break" : "Clocked out";
+        stateText.innerHTML = label + (employee.workedMinutes > 0 ? '<span class="pill">' + formatMinutes(employee.workedMinutes) + "</span>" : "");
+        detail.textContent = employee.clockInAt
+          ? "Since " + new Date(employee.clockInAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+          : "No clock-in recorded today";
+      }
+
+      function formatMinutes(minutes) {
+        const hours = Math.floor(minutes / 60);
+        const rest = minutes % 60;
+        return hours > 0 ? hours + "h " + rest + "m" : rest + "m";
+      }
+
+      async function refresh() {
+        try {
+          const response = await fetch("/api/employees");
+          if (!response.ok) throw new Error("Server unavailable");
+          employees = await response.json();
+          const previous = employeeSelect.value;
+          employeeSelect.innerHTML = '<option value="">Select your name</option>' +
+            employees.map((employee) => '<option value="' + employee.id + '">' + escapeHtml(employee.name) + "</option>").join("");
+          if (previous && employees.some((employee) => String(employee.id) === previous)) {
+            employeeSelect.value = previous;
+          }
+          renderStatus();
+        } catch (error) {
+          message.className = "message err";
+          message.textContent = "Cannot reach the attendance computer. Check Wi-Fi.";
+        }
+      }
+
+      function escapeHtml(value) {
+        return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+      }
+
+      async function clock(eventType) {
+        message.textContent = "";
+        const employee = selectedEmployee();
+        if (!employee) {
+          message.className = "message err";
+          message.textContent = "Choose your name first.";
+          return;
+        }
+        if (!codeInput.value.trim()) {
+          message.className = "message err";
+          message.textContent = "Enter your employee code.";
+          return;
+        }
+        const buttons = document.querySelectorAll("button");
+        buttons.forEach((button) => (button.disabled = true));
+        try {
+          const response = await fetch("/api/clock", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              employeeId: Number(employee.id),
+              code: codeInput.value.trim(),
+              pin: pinInput.value,
+              eventType: eventType,
+            }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Request failed");
+          message.className = "message ok";
+          message.textContent = data.message + " · " + new Date().toLocaleTimeString();
+          pinInput.value = "";
+          await refresh();
+        } catch (error) {
+          message.className = "message err";
+          message.textContent = error.message;
+        } finally {
+          buttons.forEach((button) => (button.disabled = false));
+        }
+      }
+
+      employeeSelect.addEventListener("change", renderStatus);
+      document.getElementById("clockIn").addEventListener("click", () => clock("clock_in"));
+      document.getElementById("clockOut").addEventListener("click", () => clock("clock_out"));
+      refresh();
+      setInterval(refresh, 15000);
+    </script>
+  </body>
+</html>
