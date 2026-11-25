@@ -12,6 +12,8 @@ pub enum AppError {
     ShiftNotFound(i64),
     #[error("Event not found: {0}")]
     EventNotFound(i64),
+    #[error("Duty roster entry not found: {0}")]
+    DutyRosterNotFound(i64),
     #[error("Incorrect admin PIN")]
     IncorrectPin,
     #[error("An admin PIN is already configured")]

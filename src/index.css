@@ -62,7 +62,15 @@ textarea {
   animation: toast-in 160ms ease-out both;
 }
 
+@page {
+  margin: 12mm;
+}
+
 @media print {
+  body {
+    background: white !important;
+  }
+
   body * {
     visibility: hidden !important;
   }
@@ -75,11 +83,28 @@ textarea {
   .print-area {
     position: absolute;
     inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    display: block !important;
+    width: 100%;
+    padding: 0;
+    color: #0f172a;
+    background: white;
     border: none;
     box-shadow: none;
+  }
+
+  .print-area table {
+    width: 100%;
+    table-layout: auto;
+  }
+
+  .print-area th {
+    background: #f1f5f9;
+    font-weight: 600;
+    text-align: left;
+  }
+
+  .print-area tr {
+    break-inside: avoid;
   }
 
   button {

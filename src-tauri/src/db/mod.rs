@@ -1,3 +1,4 @@
+pub mod duty_roster;
 pub mod employees;
 pub mod events;
 pub mod settings;
@@ -122,13 +123,59 @@ pub fn parse_time(value: &str) -> AppResult<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{CreateEmployee, EventType};
+    use crate::models::{
+        AssignmentInput, CreateEmployee, DutyRosterInput, Employee, EventType, Shift, ShiftInput,
+    };
 
     fn test_db() -> Db {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(include_str!("migrations.sql")).unwrap();
         Db {
             conn: Arc::new(Mutex::new(conn)),
+        }
+    }
+
+    fn make_employee(conn: &Connection, code: &str, name: &str) -> Employee {
+        employees::create(
+            conn,
+            &CreateEmployee {
+                code: code.to_string(),
+                name: name.to_string(),
+                department: None,
+                role: None,
+                pin: None,
+            },
+        )
+        .unwrap()
+    }
+
+    fn make_shift(conn: &Connection, name: &str, days: &[i64], active: bool) -> Shift {
+        shifts::create_shift(
+            conn,
+            &ShiftInput {
+                name: name.to_string(),
+                start_time: "10:00".to_string(),
+                end_time: "12:00".to_string(),
+                days: days.to_vec(),
+                break_minutes: 15,
+                active,
+            },
+        )
+        .unwrap()
+    }
+
+    fn duty_input(
+        employee_id: i64,
+        duty_date: &str,
+        shift_id: Option<i64>,
+        duty: &str,
+    ) -> DutyRosterInput {
+        DutyRosterInput {
+            employee_id,
+            duty_date: duty_date.to_string(),
+            shift_id,
+            duty: duty.to_string(),
+            notes: None,
         }
     }
 
@@ -241,5 +288,90 @@ mod tests {
         assert_eq!(settings.company_name, "My Organization");
         assert!(!settings.pin_enabled);
         assert_eq!(settings.overtime_daily_hours, 8.0);
+    }
+
+    #[test]
+    fn duty_roster_crud_filters_by_date() {
+        let db = test_db();
+        let conn = lock_conn(&db).unwrap();
+        let employee = make_employee(&conn, "DUTY-001", "Duty Tester");
+
+        let first = duty_roster::create(
+            &conn,
+            &duty_input(employee.id, "2026-11-25", None, "Front desk"),
+        )
+        .unwrap();
+        duty_roster::create(&conn, &duty_input(employee.id, "2026-11-27", None, "Patrol")).unwrap();
+
+        let monday = duty_roster::list_for_range(&conn, "2026-11-25", "2026-11-26").unwrap();
+        assert_eq!(monday.len(), 1);
+        assert_eq!(monday[0].duty, "Front desk");
+        assert_eq!(monday[0].employee_name, "Duty Tester");
+
+        duty_roster::update(
+            &conn,
+            first.id,
+            &duty_input(employee.id, "2026-11-27", None, "Reception"),
+        )
+        .unwrap();
+        let week = duty_roster::list_for_range(&conn, "2026-11-23", "2026-11-29").unwrap();
+        assert_eq!(week.len(), 2);
+        assert!(week.iter().all(|entry| entry.duty_date == "2026-11-27"));
+
+        duty_roster::delete(&conn, first.id).unwrap();
+        assert!(duty_roster::get(&conn, first.id).is_err());
+        assert!(duty_roster::delete(&conn, first.id).is_err());
+        assert_eq!(
+            duty_roster::list_for_range(&conn, "2026-11-23", "2026-11-29")
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn duty_roster_generation_dedupes_and_respects_filters() {
+        let db = test_db();
+        let mut conn = lock_conn(&db).unwrap();
+        let active = make_shift(&conn, "Monday shift", &[1], true);
+        let inactive = make_shift(&conn, "Retired shift", &[1], false);
+
+        let on_main = make_employee(&conn, "DUTY-002", "On Schedule");
+        let starts_late = make_employee(&conn, "DUTY-003", "Starts Later");
+        let ended = make_employee(&conn, "DUTY-004", "Already Ended");
+        let retired = make_employee(&conn, "DUTY-005", "Retired Shift");
+
+        for (employee_id, shift_id, from, to) in [
+            (on_main.id, active.id, "2026-11-01", None),
+            (starts_late.id, active.id, "2026-11-24", None),
+            (ended.id, active.id, "2026-11-01", Some("2026-11-22")),
+            (retired.id, inactive.id, "2026-11-01", None),
+        ] {
+            shifts::create_assignment(
+                &conn,
+                &AssignmentInput {
+                    employee_id,
+                    shift_id,
+                    effective_from: from.to_string(),
+                    effective_to: to.map(str::to_string),
+                },
+            )
+            .unwrap();
+        }
+
+        let first = duty_roster::generate_from_schedule(&mut conn, "2026-11-23").unwrap();
+        assert_eq!(first.created, 1);
+        assert_eq!(first.skipped, 0);
+
+        let second = duty_roster::generate_from_schedule(&mut conn, "2026-11-23").unwrap();
+        assert_eq!(second.created, 0);
+        assert_eq!(second.skipped, 1);
+
+        let entries = duty_roster::list_for_range(&conn, "2026-11-23", "2026-11-29").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].employee_id, on_main.id);
+        assert_eq!(entries[0].shift_id, Some(active.id));
+        assert_eq!(entries[0].duty, "Monday shift");
+        assert_eq!(entries[0].source, "generated");
     }
 }

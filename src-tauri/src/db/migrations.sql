@@ -46,6 +46,20 @@ CREATE TABLE IF NOT EXISTS shift_assignments (
 
 CREATE INDEX IF NOT EXISTS idx_assignments_employee ON shift_assignments(employee_id, effective_from);
 
+CREATE TABLE IF NOT EXISTS duty_rosters (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id  INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    duty_date    TEXT    NOT NULL,
+    shift_id     INTEGER REFERENCES shifts(id) ON DELETE SET NULL,
+    duty         TEXT    NOT NULL,
+    notes        TEXT,
+    source       TEXT    NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'generated')),
+    created_at   TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_duty_roster_date ON duty_rosters(duty_date);
+CREATE INDEX IF NOT EXISTS idx_duty_roster_employee_date ON duty_rosters(employee_id, duty_date);
+
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL

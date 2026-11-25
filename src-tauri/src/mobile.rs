@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::net::{IpAddr, UdpSocket};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Mutex;
@@ -8,7 +9,7 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use tiny_http::{Header, Method, Response, Server};
 
-use crate::db::{employees, events, lock_conn, timestamp_or_now, Db};
+use crate::db::{duty_roster, employees, events, lock_conn, timestamp_or_now, Db};
 use crate::error::{AppError, AppResult};
 use crate::models::EventType;
 use crate::reporting::{build_statuses, compute_periods};
@@ -39,6 +40,16 @@ struct MobileEmployee {
     state: String,
     clock_in_at: Option<String>,
     worked_minutes: i64,
+    today_duty: Option<MobileDuty>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MobileDuty {
+    duty: String,
+    shift_name: Option<String>,
+    start_time: Option<String>,
+    end_time: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -207,6 +218,24 @@ fn employee_list(db: &Db) -> AppResult<Vec<MobileEmployee>> {
     let todays_events = events::list(&conn, None, Some(today), None, 5000)?;
     let statuses = build_statuses(&employees, &todays_events);
 
+    let today_str = Local::now().format("%Y-%m-%d").to_string();
+    let records = duty_roster::list_for_range(&conn, &today_str, &today_str)?;
+    let shifts = crate::db::shifts::list_shifts(&conn, false)?;
+    let mut duties: HashMap<i64, MobileDuty> = HashMap::new();
+    for record in records {
+        let shift = record
+            .shift_id
+            .and_then(|id| shifts.iter().find(|shift| shift.id == id));
+        duties.entry(record.employee_id).or_insert(MobileDuty {
+            duty: record.duty.clone(),
+            shift_name: shift
+                .map(|shift| shift.name.clone())
+                .or_else(|| record.shift_name.clone()),
+            start_time: shift.map(|shift| shift.start_time.clone()),
+            end_time: shift.map(|shift| shift.end_time.clone()),
+        });
+    }
+
     Ok(statuses
         .into_iter()
         .map(|status| MobileEmployee {
@@ -216,6 +245,7 @@ fn employee_list(db: &Db) -> AppResult<Vec<MobileEmployee>> {
             state: status.state,
             clock_in_at: status.clock_in_at,
             worked_minutes: status.open_minutes,
+            today_duty: duties.get(&status.employee.id).cloned(),
         })
         .collect())
 }

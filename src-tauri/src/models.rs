@@ -143,6 +143,59 @@ pub struct AssignmentInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DutyRosterRecord {
+    pub id: i64,
+    pub employee_id: i64,
+    pub employee_name: String,
+    pub duty_date: String,
+    pub shift_id: Option<i64>,
+    pub shift_name: Option<String>,
+    pub duty: String,
+    pub notes: Option<String>,
+    pub source: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DutyRosterEntry {
+    pub id: i64,
+    pub employee_id: i64,
+    pub employee_name: String,
+    pub duty_date: String,
+    pub shift_id: Option<i64>,
+    pub shift_name: Option<String>,
+    pub duty: String,
+    pub notes: Option<String>,
+    pub source: String,
+    pub created_at: String,
+    pub planned_start: Option<String>,
+    pub planned_end: Option<String>,
+    pub planned_minutes: i64,
+    pub actual_clock_in: Option<String>,
+    pub actual_clock_out: Option<String>,
+    pub worked_minutes: i64,
+    pub late_minutes: i64,
+    pub early_minutes: i64,
+    pub state: String,
+    pub attendance_status: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DutyRosterInput {
+    pub employee_id: i64,
+    pub duty_date: String,
+    pub shift_id: Option<i64>,
+    pub duty: String,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DutyRosterGenerateResult {
+    pub created: i64,
+    pub skipped: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScheduleEntry {
     pub date: String,
     pub employee_id: i64,

@@ -58,6 +58,16 @@
       .dot.break { background: #f59e0b; }
       .status strong { display: block; font-size: 14px; }
       .status span { font-size: 12px; color: #64748b; }
+      .duty {
+        border: 1px solid #c7d2fe;
+        background: #eef2ff;
+        border-radius: 12px;
+        padding: 12px 14px;
+        margin-bottom: 16px;
+      }
+      .duty-label { display: block; font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: #4f46e5; }
+      .duty strong { display: block; margin-top: 4px; font-size: 14px; color: #312e81; }
+      .duty-meta { display: block; margin-top: 2px; font-size: 12px; color: #6366f1; }
       .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
       button {
         border: none;
@@ -106,6 +116,12 @@
           </div>
         </div>
 
+        <div id="duty" class="duty" hidden>
+          <span class="duty-label">Today's duty</span>
+          <strong id="dutyName"></strong>
+          <span id="dutyMeta" class="duty-meta"></span>
+        </div>
+
         <div class="actions">
           <button id="clockIn">Clock in</button>
           <button id="clockOut">Clock out</button>
@@ -125,6 +141,9 @@
       const dot = document.getElementById("dot");
       const stateText = document.getElementById("state");
       const detail = document.getElementById("detail");
+      const dutyBox = document.getElementById("duty");
+      const dutyName = document.getElementById("dutyName");
+      const dutyMeta = document.getElementById("dutyMeta");
       let employees = [];
 
       function tick() {
@@ -143,6 +162,7 @@
           dot.className = "dot";
           stateText.textContent = "Select an employee";
           detail.textContent = "Status updates automatically";
+          dutyBox.hidden = true;
           pinGroup.hidden = true;
           return;
         }
@@ -153,6 +173,14 @@
         detail.textContent = employee.clockInAt
           ? "Since " + new Date(employee.clockInAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
           : "No clock-in recorded today";
+
+        const duty = employee.todayDuty;
+        dutyBox.hidden = !duty;
+        if (duty) {
+          dutyName.textContent = duty.duty;
+          const time = duty.startTime && duty.endTime ? " · " + duty.startTime + "–" + duty.endTime : "";
+          dutyMeta.textContent = (duty.shiftName ? duty.shiftName : "Assigned duty") + time;
+        }
       }
 
       function formatMinutes(minutes) {

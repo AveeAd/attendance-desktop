@@ -105,6 +105,42 @@ export interface AssignmentInput {
   effective_to: string | null;
 }
 
+export interface DutyRosterEntry {
+  id: number;
+  employee_id: number;
+  employee_name: string;
+  duty_date: string;
+  shift_id: number | null;
+  shift_name: string | null;
+  duty: string;
+  notes: string | null;
+  source: "manual" | "generated";
+  created_at: string;
+  planned_start: string | null;
+  planned_end: string | null;
+  planned_minutes: number;
+  actual_clock_in: string | null;
+  actual_clock_out: string | null;
+  worked_minutes: number;
+  late_minutes: number;
+  early_minutes: number;
+  state: "in" | "out" | "on_break";
+  attendance_status: "scheduled" | "completed" | "late" | "missed" | "in_progress";
+}
+
+export interface DutyRosterInput {
+  employee_id: number;
+  duty_date: string;
+  shift_id: number | null;
+  duty: string;
+  notes: string | null;
+}
+
+export interface DutyRosterGenerateResult {
+  created: number;
+  skipped: number;
+}
+
 export interface ScheduleEntry {
   date: string;
   employee_id: number;

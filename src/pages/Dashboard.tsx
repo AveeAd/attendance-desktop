@@ -18,6 +18,7 @@ import {
 import { api, errorMessage } from "@/lib/ipc";
 import { formatDuration, formatTime, initials, localIso } from "@/lib/format";
 import { Badge, Button, Card, EmptyState, Input, cn } from "@/components/ui";
+import { DutyRosterWidget } from "@/components/DutyRoster";
 import { toast } from "@/store/toast";
 import type { EventType } from "@/types";
 
@@ -91,6 +92,7 @@ export function Dashboard() {
       inputRef.current?.focus();
       void queryClient.invalidateQueries({ queryKey: ["statuses"] });
       void queryClient.invalidateQueries({ queryKey: ["events"] });
+      void queryClient.invalidateQueries({ queryKey: ["dutyRoster"] });
     },
     onError: (error) => {
       toast.error(errorMessage(error));
@@ -182,6 +184,8 @@ export function Dashboard() {
             )}
           </form>
         </Card>
+
+        <DutyRosterWidget />
 
         <Card title="Today's activity" description="Most recent scans across all employees">
           {events.length === 0 ? (

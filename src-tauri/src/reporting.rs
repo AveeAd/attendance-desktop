@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, TimeZone, Utc};
 
 use crate::db::parse_timestamp;
 use crate::error::AppResult;
 use crate::models::{
-    AppSettings, Employee, EmployeeStatus, EventType, ScheduleEntry, Shift, ShiftAssignment,
-    TimeEvent, TimesheetReport, TimesheetRow,
+    AppSettings, DutyRosterEntry, DutyRosterRecord, Employee, EmployeeStatus, EventType,
+    ScheduleEntry, Shift, ShiftAssignment, TimeEvent, TimesheetReport, TimesheetRow,
 };
 
 #[derive(Debug, Clone)]
@@ -257,6 +257,121 @@ pub fn build_statuses(employees: &[Employee], events: &[TimeEvent]) -> Vec<Emplo
         .collect()
 }
 
+fn local_fixed_offset() -> FixedOffset {
+    let seconds = Local::now().offset().local_minus_utc();
+    FixedOffset::east_opt(seconds).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap())
+}
+
+/// Combines saved duty assignments with the same period/attendance logic used
+/// by Schedule and Reports. Roster rows without a matching shift remain valid
+/// but have no planned time.
+pub fn build_duty_roster(
+    records: &[DutyRosterRecord],
+    shifts: &[Shift],
+    periods: &[WorkPeriod],
+    statuses: &[EmployeeStatus],
+) -> Vec<DutyRosterEntry> {
+    let today = Local::now().date_naive();
+    let today_str = today.format("%Y-%m-%d").to_string();
+    let now_epoch = Utc::now().timestamp();
+    let offset = local_fixed_offset();
+
+    records
+        .iter()
+        .map(|record| {
+            let date = NaiveDate::parse_from_str(&record.duty_date, "%Y-%m-%d").unwrap_or(today);
+            let shift = record
+                .shift_id
+                .and_then(|id| shifts.iter().find(|shift| shift.id == id));
+
+            let (planned_start, planned_end, planned_minutes) = match shift {
+                Some(shift) => {
+                    let start = naive_at(&date, &shift.start_time, offset);
+                    let end = naive_at(&date, &shift.end_time, offset);
+                    let span = (end - start).num_minutes();
+                    let planned = (span - shift.break_minutes.min(span.max(0))).max(0);
+                    (
+                        Some(start.to_rfc3339()),
+                        Some(end.to_rfc3339()),
+                        planned,
+                    )
+                }
+                None => (None, None, 0),
+            };
+
+            let expected_in_epoch = planned_start
+                .as_deref()
+                .and_then(|value| parse_timestamp(value).ok())
+                .map(|value| value.timestamp());
+            let expected_out_epoch = planned_end
+                .as_deref()
+                .and_then(|value| parse_timestamp(value).ok())
+                .map(|value| value.timestamp());
+
+            let period = periods.iter().find(|period| {
+                period.employee_id == record.employee_id
+                    && period.local_date().as_deref() == Some(record.duty_date.as_str())
+            });
+            let actual_in_epoch = period.map(|period| period.clock_in_epoch);
+            let actual_out_epoch = period.and_then(|period| period.clock_out_epoch);
+            let worked_minutes = period
+                .map(|period| period.worked_minutes(now_epoch).max(0))
+                .unwrap_or(0);
+            let late_minutes = match (actual_in_epoch, expected_in_epoch) {
+                (Some(actual), Some(expected)) => (actual - expected).max(0) / 60,
+                _ => 0,
+            };
+            let early_minutes = match (actual_out_epoch, expected_out_epoch) {
+                (Some(actual), Some(expected)) => (expected - actual).max(0) / 60,
+                _ => 0,
+            };
+
+            let attendance_status = if period.is_none() {
+                if date < today { "missed" } else { "scheduled" }
+            } else if actual_out_epoch.is_none() {
+                "in_progress"
+            } else if late_minutes > 0 || early_minutes > 0 {
+                "late"
+            } else {
+                "completed"
+            };
+
+            let state = if record.duty_date == today_str {
+                statuses
+                    .iter()
+                    .find(|status| status.employee.id == record.employee_id)
+                    .map(|status| status.state.clone())
+                    .unwrap_or_else(|| "out".to_string())
+            } else {
+                "out".to_string()
+            };
+
+            DutyRosterEntry {
+                id: record.id,
+                employee_id: record.employee_id,
+                employee_name: record.employee_name.clone(),
+                duty_date: record.duty_date.clone(),
+                shift_id: record.shift_id,
+                shift_name: record.shift_name.clone(),
+                duty: record.duty.clone(),
+                notes: record.notes.clone(),
+                source: record.source.clone(),
+                created_at: record.created_at.clone(),
+                planned_start,
+                planned_end,
+                planned_minutes,
+                actual_clock_in: period.map(|period| period.clock_in.clone()),
+                actual_clock_out: period.and_then(|period| period.clock_out.clone()),
+                worked_minutes,
+                late_minutes,
+                early_minutes,
+                state,
+                attendance_status: attendance_status.to_string(),
+            }
+        })
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn build_schedule(
     assignments: &[ShiftAssignment],
@@ -436,5 +551,57 @@ mod tests {
         assert_eq!(periods[0].clock_in_epoch, 0);
         assert_eq!(periods[0].clock_out_epoch, Some(180));
         assert_eq!(periods[0].break_minutes, 0);
+    }
+
+    #[test]
+    fn duty_roster_uses_shift_time_and_live_state() {
+        let today = Local::now().date_naive().format("%Y-%m-%d").to_string();
+        let shift = Shift {
+            id: 7,
+            name: "Day shift".to_string(),
+            start_time: "10:00".to_string(),
+            end_time: "12:00".to_string(),
+            days: vec![1, 2, 3, 4, 5],
+            break_minutes: 15,
+            active: true,
+        };
+        let record = DutyRosterRecord {
+            id: 1,
+            employee_id: 1,
+            employee_name: "Jane Doe".to_string(),
+            duty_date: today.clone(),
+            shift_id: Some(shift.id),
+            shift_name: Some(shift.name.clone()),
+            duty: "Front desk".to_string(),
+            notes: None,
+            source: "manual".to_string(),
+            created_at: String::new(),
+        };
+        let employee = Employee {
+            id: 1,
+            code: "EMP-100".to_string(),
+            name: "Jane Doe".to_string(),
+            department: None,
+            role: None,
+            active: true,
+            pin_hash: String::new(),
+            has_pin: false,
+            qr_token: "token".to_string(),
+            created_at: String::new(),
+        };
+        let status = EmployeeStatus {
+            employee,
+            state: "in".to_string(),
+            last_event_at: None,
+            clock_in_at: None,
+            open_minutes: 0,
+        };
+
+        let entries = build_duty_roster(&[record], &[shift], &[], &[status]);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].planned_minutes, 105);
+        assert_eq!(entries[0].state, "in");
+        assert_eq!(entries[0].attendance_status, "scheduled");
+        assert_eq!(entries[0].duty_date, today);
     }
 }

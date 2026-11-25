@@ -2,18 +2,20 @@ use std::path::PathBuf;
 
 use argon2::password_hash::{SaltString, PasswordHash};
 use argon2::{Argon2, PasswordHasher, PasswordVerifier};
-use chrono::{Local, NaiveDate};
+use chrono::{Duration, Local, NaiveDate};
 use rand_core::OsRng;
 use tauri::command;
 
 use crate::db::{lock_conn, parse_timestamp, timestamp_or_now, Db};
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    AppSettings, AssignmentInput, ClockInput, ClockResult, CreateEmployee, Employee, EventType,
-    ScheduleEntry, SettingsInput, Shift, ShiftAssignment, ShiftInput, TimeEvent, TimesheetReport,
-    UpdateEmployee,
+    AppSettings, AssignmentInput, ClockInput, ClockResult, CreateEmployee, DutyRosterEntry,
+    DutyRosterInput, Employee, EventType, ScheduleEntry, SettingsInput, Shift, ShiftAssignment,
+    ShiftInput, TimeEvent, TimesheetReport, UpdateEmployee,
 };
-use crate::reporting::{build_schedule, build_statuses, build_timesheet, compute_periods};
+use crate::reporting::{
+    build_duty_roster, build_schedule, build_statuses, build_timesheet, compute_periods,
+};
 
 #[command]
 pub fn list_employees(db: tauri::State<'_, Db>, active_only: Option<bool>) -> AppResult<Vec<Employee>> {
@@ -219,6 +221,147 @@ pub fn get_schedule(db: tauri::State<'_, Db>, week_start: String) -> AppResult<V
     let events = crate::db::events::list(&conn, None, Some(from_epoch), Some(to_epoch), 5000)?;
     let periods = compute_periods(&events);
     build_schedule(&assignments, &shifts, &periods, &events, &week_start)
+}
+
+#[command]
+pub fn list_duty_roster(db: tauri::State<'_, Db>, week_start: String) -> AppResult<Vec<DutyRosterEntry>> {
+    let conn = lock_conn(&db)?;
+    let start = NaiveDate::parse_from_str(&week_start, "%Y-%m-%d")
+        .map_err(|_| AppError::InvalidInput("Invalid week start date".to_string()))?;
+    let end = (start + Duration::days(6)).format("%Y-%m-%d").to_string();
+    duty_roster_for_range(&conn, &week_start, &end)
+}
+
+#[command]
+pub fn create_duty_roster(db: tauri::State<'_, Db>, input: DutyRosterInput) -> AppResult<DutyRosterEntry> {
+    let conn = lock_conn(&db)?;
+    let record = crate::db::duty_roster::create(&conn, &input)?;
+    Ok(build_duty_roster(&[record], &shifts_for_roster(&conn)?, &[], &today_statuses(&conn)?)
+        .into_iter()
+        .next()
+        .unwrap())
+}
+
+#[command]
+pub fn update_duty_roster(
+    db: tauri::State<'_, Db>,
+    id: i64,
+    input: DutyRosterInput,
+) -> AppResult<DutyRosterEntry> {
+    let conn = lock_conn(&db)?;
+    let record = crate::db::duty_roster::update(&conn, id, &input)?;
+    Ok(build_duty_roster(&[record], &shifts_for_roster(&conn)?, &[], &today_statuses(&conn)?)
+        .into_iter()
+        .next()
+        .unwrap())
+}
+
+#[command]
+pub fn delete_duty_roster(db: tauri::State<'_, Db>, id: i64) -> AppResult<()> {
+    let conn = lock_conn(&db)?;
+    crate::db::duty_roster::delete(&conn, id)
+}
+
+#[command]
+pub fn generate_duty_roster(
+    db: tauri::State<'_, Db>,
+    week_start: String,
+) -> AppResult<crate::models::DutyRosterGenerateResult> {
+    let mut conn = lock_conn(&db)?;
+    crate::db::duty_roster::generate_from_schedule(&mut conn, &week_start)
+}
+
+fn shifts_for_roster(conn: &rusqlite::Connection) -> AppResult<Vec<Shift>> {
+    crate::db::shifts::list_shifts(conn, false)
+}
+
+fn today_statuses(conn: &rusqlite::Connection) -> AppResult<Vec<crate::models::EmployeeStatus>> {
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    let (from_epoch, _) = date_range(&today, &today)?;
+    let events = crate::db::events::list(conn, None, Some(from_epoch), None, 5000)?;
+    let employees = crate::db::employees::list(conn, true)?;
+    Ok(build_statuses(&employees, &events))
+}
+
+fn duty_roster_for_range(
+    conn: &rusqlite::Connection,
+    from: &str,
+    to: &str,
+) -> AppResult<Vec<DutyRosterEntry>> {
+    let (from_epoch, to_epoch) = date_range(from, to)?;
+    let records = crate::db::duty_roster::list_for_range(conn, from, to)?;
+    let shifts = shifts_for_roster(conn)?;
+    let events = crate::db::events::list(conn, None, Some(from_epoch), Some(to_epoch), 20000)?;
+    let periods = compute_periods(&events);
+    Ok(build_duty_roster(&records, &shifts, &periods, &today_statuses(conn)?))
+}
+
+fn csv_time(value: Option<&str>) -> String {
+    value
+        .and_then(|value| parse_timestamp(value).ok())
+        .map(|value| value.format("%H:%M").to_string())
+        .unwrap_or_default()
+}
+
+#[derive(serde::Serialize)]
+struct DutyRosterCsvRow {
+    #[serde(rename = "Date")]
+    duty_date: String,
+    #[serde(rename = "Employee")]
+    employee_name: String,
+    #[serde(rename = "Duty")]
+    duty: String,
+    #[serde(rename = "Shift")]
+    shift_name: String,
+    #[serde(rename = "Start")]
+    start: String,
+    #[serde(rename = "End")]
+    end: String,
+    #[serde(rename = "Status")]
+    attendance_status: String,
+    #[serde(rename = "Clock in")]
+    clock_in: String,
+    #[serde(rename = "Clock out")]
+    clock_out: String,
+    #[serde(rename = "Worked (min)")]
+    worked_minutes: i64,
+    #[serde(rename = "Late (min)")]
+    late_minutes: i64,
+    #[serde(rename = "Early (min)")]
+    early_minutes: i64,
+    #[serde(rename = "Notes")]
+    notes: String,
+}
+
+#[command]
+pub fn export_duty_roster_csv(
+    db: tauri::State<'_, Db>,
+    path: String,
+    from: String,
+    to: String,
+) -> AppResult<i64> {
+    let conn = lock_conn(&db)?;
+    let entries = duty_roster_for_range(&conn, &from, &to)?;
+    let mut writer = csv::Writer::from_path(PathBuf::from(&path))?;
+    for entry in &entries {
+        writer.serialize(DutyRosterCsvRow {
+            duty_date: entry.duty_date.clone(),
+            employee_name: entry.employee_name.clone(),
+            duty: entry.duty.clone(),
+            shift_name: entry.shift_name.clone().unwrap_or_default(),
+            start: csv_time(entry.planned_start.as_deref()),
+            end: csv_time(entry.planned_end.as_deref()),
+            attendance_status: entry.attendance_status.clone(),
+            clock_in: csv_time(entry.actual_clock_in.as_deref()),
+            clock_out: csv_time(entry.actual_clock_out.as_deref()),
+            worked_minutes: entry.worked_minutes,
+            late_minutes: entry.late_minutes,
+            early_minutes: entry.early_minutes,
+            notes: entry.notes.clone().unwrap_or_default(),
+        })?;
+    }
+    writer.flush()?;
+    Ok(entries.len() as i64)
 }
 
 fn date_range(from: &str, to: &str) -> AppResult<(i64, i64)> {
@@ -437,4 +580,41 @@ pub fn mobile_server_status(
     server: tauri::State<'_, crate::mobile::MobileServer>,
 ) -> AppResult<crate::mobile::MobileServerState> {
     server.status()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duty_roster_csv_exposes_report_columns() {
+        let row = DutyRosterCsvRow {
+            duty_date: "2026-11-25".to_string(),
+            employee_name: "Jane Doe".to_string(),
+            duty: "Front desk".to_string(),
+            shift_name: "Morning".to_string(),
+            start: csv_time(Some("2026-11-25T10:00:00+08:00")),
+            end: csv_time(Some("2026-11-25T12:00:00+08:00")),
+            attendance_status: "completed".to_string(),
+            clock_in: csv_time(Some("2026-11-25T10:05:00+08:00")),
+            clock_out: csv_time(Some("2026-11-25T12:00:00+08:00")),
+            worked_minutes: 115,
+            late_minutes: 5,
+            early_minutes: 0,
+            notes: "Covering reception".to_string(),
+        };
+
+        let mut writer = csv::Writer::from_writer(Vec::new());
+        writer.serialize(row).unwrap();
+        writer.flush().unwrap();
+        let output = String::from_utf8(writer.into_inner().unwrap()).unwrap();
+        let mut lines = output.lines();
+        assert_eq!(
+            lines.next().unwrap(),
+            "Date,Employee,Duty,Shift,Start,End,Status,Clock in,Clock out,Worked (min),Late (min),Early (min),Notes"
+        );
+        assert!(lines.next().unwrap().starts_with(
+            "2026-11-25,Jane Doe,Front desk,Morning,10:00,12:00,completed,10:05,12:00,115,5,0,Covering reception"
+        ));
+    }
 }

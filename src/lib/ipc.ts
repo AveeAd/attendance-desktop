@@ -5,6 +5,9 @@ import type {
   ClockInput,
   ClockResult,
   CreateEmployeeInput,
+  DutyRosterEntry,
+  DutyRosterGenerateResult,
+  DutyRosterInput,
   Employee,
   EmployeeStatus,
   MobileServerState,
@@ -72,6 +75,22 @@ export const api = {
   deleteAssignment: (id: number) => invoke<void>("delete_assignment", { id }),
   getSchedule: (weekStart: string) =>
     invoke<ScheduleEntry[]>("get_schedule", { weekStart }),
+
+  listDutyRoster: (weekStart: string) =>
+    invoke<DutyRosterEntry[]>("list_duty_roster", { weekStart }),
+  createDutyRoster: (input: DutyRosterInput) =>
+    invoke<DutyRosterEntry>("create_duty_roster", { input }),
+  updateDutyRoster: (id: number, input: DutyRosterInput) =>
+    invoke<DutyRosterEntry>("update_duty_roster", { id, input }),
+  deleteDutyRoster: (id: number) => invoke<void>("delete_duty_roster", { id }),
+  generateDutyRoster: (weekStart: string) =>
+    invoke<DutyRosterGenerateResult>("generate_duty_roster", { weekStart }),
+  exportDutyRosterCsv: (params: { path: string; from: string; to: string }) =>
+    invoke<number>("export_duty_roster_csv", {
+      path: params.path,
+      from: params.from,
+      to: params.to,
+    }),
 
   getTimesheet: (params: {
     from: string;
